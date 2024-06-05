@@ -3,12 +3,12 @@ import numpy as np
 import math
 from PIL import Image, ImageDraw, ImageFont
 
-text = "shutterstock"
+text = "-------shutterstock-----^---------"
 thickness = 0.01
-scale = 30
-pad = 150
-angle = -40
-blend = 0.25
+scale = 10  # Size of the one Tile
+pad = 20 # Space between two text
+angle = -40  # Angle of the text.
+blend = 0.25  # Opacity of the imposed Tile
 font_path = 'mytryd.ttf'
 
 def rotate_bound(image, angle):
@@ -27,16 +27,9 @@ def rotate_bound(image, angle):
 
     return cv2.warpAffine(image, M, (nW, nH))
 
-def add_distortion(image):
-    h, w = image.shape[:2]
-    src_points = np.float32([[0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1]])
-    dst_points = np.float32([[0, 0], [w - 1, 0], [int(0.1 * w), h - 1], [int(0.9 * w), h - 1]])
-    matrix = cv2.getPerspectiveTransform(src_points, dst_points)
-    distorted = cv2.warpPerspective(image, matrix, (w, h))
-    return distorted
 
 # read image
-photo = cv2.imread('input/demo.jpg')
+photo = cv2.imread('input/input.jpg')
 ph, pw = photo.shape[:2]
 
 # determine size for text image using Pillow
@@ -45,19 +38,49 @@ bbox = font.getbbox(text)
 wd, ht = bbox[2] - bbox[0], bbox[3] - bbox[1]
 baseLine = 0  # Not used in Pillow
 
-# add text to black background image padded all around
+# add text to transparent background image padded all around
 pad2 = 2 * pad
-text_img_pil = Image.new('RGB', (wd + pad2, ht + pad2), (0, 0, 0))
+text_img_pil = Image.new('RGBA', (wd + pad2, ht + pad2), (0, 0, 0, 0))
 draw = ImageDraw.Draw(text_img_pil)
-draw.text((pad, pad), text, font=font, fill=(255, 255, 255))
 
-# convert Pillow image to OpenCV format
+def draw_rotated_rectangle(draw, xy, angle, fill=None):
+    (x0, y0, x1, y1) = xy
+    rect_w, rect_h = x1 - x0 + 10, y1 - y0 - 5
+    rect_img = Image.new('RGBA', (rect_w, rect_h), (0, 0, 0, 0))
+    rect_draw = ImageDraw.Draw(rect_img)
+    rect_draw.rectangle([0, -5, rect_w, rect_h], fill=fill)
+    
+    rect_img = rect_img.rotate(angle, expand=True)
+    draw.bitmap((x0 - 17, y0), rect_img, fill=None)
+
+
+
+# function to draw individual letters with different styles
+def draw_text_with_styles(draw, position, text, font):
+    x, y = position
+    for char in text:
+        char_bbox = font.getbbox(char)
+        char_w, char_h = char_bbox[2] - char_bbox[0], char_bbox[3] - char_bbox[1]
+        
+        if char == '^':
+            draw_rotated_rectangle(draw, [x, y, x + char_w, y + char_h ], 50, fill=(0, 0, 0, 255))
+            # draw.rectangle([x - 5, y + 10, x + char_w + 5, y + char_h + 10], fill=(0, 0, 0, 255))
+            draw.text((x, y), char, font=font, fill=(0, 0, 0, 255))
+        elif char == '-':
+            draw.text((x, y), char, font=font, fill=(0,0,0, 255))
+        else:
+            draw.text((x, y), char, font=font, fill=(255, 255, 255, 255))
+        
+        x += char_w
+
+# draw the text with custom styles
+draw_text_with_styles(draw, (pad, pad), text, font)
+
+# convert Pillow image to OpenCV format with alpha channel
 text_img = np.array(text_img_pil)
 
-distorted_text_img = add_distortion(text_img)
-
 # rotate text image
-text_rot = rotate_bound(distorted_text_img, angle)
+text_rot = rotate_bound(text_img, angle)
 th, tw = text_rot.shape[:2]
 
 # tile the rotated text image to the size of the input
@@ -65,11 +88,17 @@ xrepeats = math.ceil(pw / tw)
 yrepeats = math.ceil(ph / th)
 tiled_text = np.tile(text_rot, (yrepeats, xrepeats, 1))[0:ph, 0:pw]
 
-# combine the text with the image
-result = cv2.addWeighted(photo, 1, tiled_text, blend, 0)
+# create a mask from the alpha channel
+alpha_mask = tiled_text[:, :, 3] / 255.0
+alpha_mask = np.stack([alpha_mask] * 3, axis=-1)
+
+# blend the text with the image using the alpha mask
+photo = photo.astype(float)
+tiled_text = tiled_text[:, :, :3].astype(float)
+
+result = (photo * (1 - blend * alpha_mask) + tiled_text * (blend * alpha_mask)).astype(np.uint8)
 
 # save results
 cv2.imwrite("output/text_img.png", text_img)
 cv2.imwrite("output/text_img_rot.png", text_rot)
 cv2.imwrite("output/result.jpg", result)
-
