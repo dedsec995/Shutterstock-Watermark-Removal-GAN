@@ -3,13 +3,13 @@ import numpy as np
 import math
 from PIL import Image, ImageDraw, ImageFont
 
-text = "-------shutterstock-----^---------"
+text = "-----shutterstock-----~-------^---------"
 thickness = 0.01
 scale = 10  # Size of the one Tile
-pad = 20 # Space between two text
+pad = 25 # Space between two text
 angle = -40  # Angle of the text.
 blend = 0.25  # Opacity of the imposed Tile
-font_path = 'mytryd.ttf'
+font_path = 'shutterstock.ttf'
 
 def rotate_bound(image, angle):
     (h, w) = image.shape[:2]
@@ -43,38 +43,48 @@ pad2 = 2 * pad
 text_img_pil = Image.new('RGBA', (wd + pad2, ht + pad2), (0, 0, 0, 0))
 draw = ImageDraw.Draw(text_img_pil)
 
-def draw_rotated_rectangle(draw, xy, angle, fill=None):
-    (x0, y0, x1, y1) = xy
-    rect_w, rect_h = x1 - x0 + 10, y1 - y0 - 5
-    rect_img = Image.new('RGBA', (rect_w, rect_h), (0, 0, 0, 0))
-    rect_draw = ImageDraw.Draw(rect_img)
-    rect_draw.rectangle([0, -5, rect_w, rect_h], fill=fill)
-    
-    rect_img = rect_img.rotate(angle, expand=True)
-    draw.bitmap((x0 - 17, y0), rect_img, fill=None)
 
 
-
-# function to draw individual letters with different styles
-def draw_text_with_styles(draw, position, text, font):
+def draw_text_with_styles(draw, position, text, font, angle):
     x, y = position
     for char in text:
         char_bbox = font.getbbox(char)
         char_w, char_h = char_bbox[2] - char_bbox[0], char_bbox[3] - char_bbox[1]
         
         if char == '^':
-            draw_rotated_rectangle(draw, [x, y, x + char_w, y + char_h ], 50, fill=(0, 0, 0, 255))
-            # draw.rectangle([x - 5, y + 10, x + char_w + 5, y + char_h + 10], fill=(0, 0, 0, 255))
-            draw.text((x, y), char, font=font, fill=(0, 0, 0, 255))
+            # Rotate the rectangle
+            rotated_rect = [
+                (x , y + 5),
+                (x + char_w + 20, y + 5),
+                (x + char_w + 20, y + char_h + 20),
+                (x , y + char_h + 20)
+            ]
+            rotated_rect = rotate_rect(rotated_rect, angle, (x + char_w / 2, y + char_h / 2))
+            draw.polygon(rotated_rect, fill=(111, 111, 111, 255))
+            draw.text((x, y), char, font=font, fill=(255, 255, 255, 255))
         elif char == '-':
-            draw.text((x, y), char, font=font, fill=(0,0,0, 255))
+            draw.text((x, y), char, font=font, fill=(0, 0, 0, 255))
         else:
             draw.text((x, y), char, font=font, fill=(255, 255, 255, 255))
         
         x += char_w
 
+def rotate_rect(points, angle, center):
+    rotated_points = []
+    angle_rad = math.radians(angle)
+    cos_theta = math.cos(angle_rad)
+    sin_theta = math.sin(angle_rad)
+    
+    for x, y in points:
+        cx, cy = center
+        nx = (x - cx) * cos_theta - (y - cy) * sin_theta + cx
+        ny = (x - cx) * sin_theta + (y - cy) * cos_theta + cy
+        rotated_points.append((nx, ny))
+    
+    return rotated_points
+
 # draw the text with custom styles
-draw_text_with_styles(draw, (pad, pad), text, font)
+draw_text_with_styles(draw, (pad, pad), text, font, 40)
 
 # convert Pillow image to OpenCV format with alpha channel
 text_img = np.array(text_img_pil)
