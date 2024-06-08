@@ -3,6 +3,8 @@ import numpy as np
 import math
 from PIL import Image, ImageDraw, ImageFont
 
+# Pro Tip: ~ will give shutterstock logo and ^ also give out the logo with grey background. Both at 40 degree rotation.
+
 text = "-----shutterstock-----~-------^---------"
 thickness = 0.01
 scale = 10  # Size of the one Tile
@@ -28,17 +30,16 @@ def rotate_bound(image, angle):
     return cv2.warpAffine(image, M, (nW, nH))
 
 
-# read image
 photo = cv2.imread('input/input.jpg')
 ph, pw = photo.shape[:2]
 
-# determine size for text image using Pillow
+# Finding out the size for text image using Pillow
 font = ImageFont.truetype(font_path, int(scale * 10))
 bbox = font.getbbox(text)
 wd, ht = bbox[2] - bbox[0], bbox[3] - bbox[1]
 baseLine = 0  # Not used in Pillow
 
-# add text to transparent background image padded all around
+
 pad2 = 2 * pad
 text_img_pil = Image.new('RGBA', (wd + pad2, ht + pad2), (0, 0, 0, 0))
 draw = ImageDraw.Draw(text_img_pil)
@@ -93,13 +94,11 @@ text_img = np.array(text_img_pil)
 text_rot = rotate_bound(text_img, angle)
 th, tw = text_rot.shape[:2]
 
-# tile the rotated text image to the size of the input
 xrepeats = math.ceil(pw / tw)
 yrepeats = math.ceil(ph / th)
 tiled_text = np.tile(text_rot, (yrepeats, xrepeats, 1))[0:ph, 0:pw]
 
-# create a mask from the alpha channel
-alpha_mask = tiled_text[:, :, 3] / 255.0
+alpha_mask = tiled_text[:, :, 3] / 255.0 # create a mask from the alpha channel
 alpha_mask = np.stack([alpha_mask] * 3, axis=-1)
 
 # blend the text with the image using the alpha mask
@@ -108,7 +107,6 @@ tiled_text = tiled_text[:, :, :3].astype(float)
 
 result = (photo * (1 - blend * alpha_mask) + tiled_text * (blend * alpha_mask)).astype(np.uint8)
 
-# save results
 cv2.imwrite("output/text_img.png", text_img)
 cv2.imwrite("output/text_img_rot.png", text_rot)
 cv2.imwrite("output/result.jpg", result)
