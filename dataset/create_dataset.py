@@ -1,3 +1,4 @@
+import os
 import cv2
 import numpy as np
 import math
@@ -8,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 text = "-----shutterstock-----~-------^---------"
 thickness = 0.01
 scale = 10  # Size of the one Tile
-pad = 25 # Space between two text
+pad = 25  # Space between two text
 angle = -40  # Angle of the text.
 blend = 0.25  # Opacity of the imposed Tile
 font_path = 'shutterstock.ttf'
@@ -28,23 +29,6 @@ def rotate_bound(image, angle):
     M[1, 2] += (nH / 2) - cY
 
     return cv2.warpAffine(image, M, (nW, nH))
-
-
-photo = cv2.imread('input/input.jpg')
-ph, pw = photo.shape[:2]
-
-# Finding out the size for text image using Pillow
-font = ImageFont.truetype(font_path, int(scale * 10))
-bbox = font.getbbox(text)
-wd, ht = bbox[2] - bbox[0], bbox[3] - bbox[1]
-baseLine = 0  # Not used in Pillow
-
-
-pad2 = 2 * pad
-text_img_pil = Image.new('RGBA', (wd + pad2, ht + pad2), (0, 0, 0, 0))
-draw = ImageDraw.Draw(text_img_pil)
-
-
 
 def draw_text_with_styles(draw, position, text, font, angle):
     x, y = position
@@ -84,29 +68,69 @@ def rotate_rect(points, angle, center):
     
     return rotated_points
 
-# draw the text with custom styles
-draw_text_with_styles(draw, (pad, pad), text, font, 40)
+def apply_watermark(photo_path, custom_name):
+    photo = cv2.imread(photo_path)
+    ph, pw = photo.shape[:2]
 
-# convert Pillow image to OpenCV format with alpha channel
-text_img = np.array(text_img_pil)
+    # Finding out the size for text image using Pillow
+    font = ImageFont.truetype(font_path, int(scale * 10))
+    bbox = font.getbbox(text)
+    wd, ht = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    baseLine = 0  # Not used in Pillow
 
-# rotate text image
-text_rot = rotate_bound(text_img, angle)
-th, tw = text_rot.shape[:2]
+    pad2 = 2 * pad
+    text_img_pil = Image.new('RGBA', (wd + pad2, ht + pad2), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(text_img_pil)
 
-xrepeats = math.ceil(pw / tw)
-yrepeats = math.ceil(ph / th)
-tiled_text = np.tile(text_rot, (yrepeats, xrepeats, 1))[0:ph, 0:pw]
+    # Draw the text with custom styles
+    draw_text_with_styles(draw, (pad, pad), text, font, 40)
 
-alpha_mask = tiled_text[:, :, 3] / 255.0 # create a mask from the alpha channel
-alpha_mask = np.stack([alpha_mask] * 3, axis=-1)
+    # Convert Pillow image to OpenCV format with alpha channel
+    text_img = np.array(text_img_pil)
 
-# blend the text with the image using the alpha mask
-photo = photo.astype(float)
-tiled_text = tiled_text[:, :, :3].astype(float)
+    # Rotate text image
+    text_rot = rotate_bound(text_img, angle)
+    th, tw = text_rot.shape[:2]
 
-result = (photo * (1 - blend * alpha_mask) + tiled_text * (blend * alpha_mask)).astype(np.uint8)
+    xrepeats = math.ceil(pw / tw)
+    yrepeats = math.ceil(ph / th)
+    tiled_text = np.tile(text_rot, (yrepeats, xrepeats, 1))[0:ph, 0:pw]
 
-cv2.imwrite("output/text_img.png", text_img)
-cv2.imwrite("output/text_img_rot.png", text_rot)
-cv2.imwrite("output/result.jpg", result)
+    alpha_mask = tiled_text[:, :, 3] / 255.0  # Create a mask from the alpha channel
+    alpha_mask = np.stack([alpha_mask] * 3, axis=-1)
+
+    # Blend the text with the image using the alpha mask
+    photo = photo.astype(float)
+    tiled_text = tiled_text[:, :, :3].astype(float)
+
+    result = (photo * (1 - blend * alpha_mask) + tiled_text * (blend * alpha_mask)).astype(np.uint8)
+
+    # Save the result
+    output_path = os.path.splitext(photo_path)[0] + f"_{custom_name}.jpg"
+    cv2.imwrite(output_path, result)
+    print(f"Saved {output_path}")
+
+def process_images(folder_path, custom_name):
+    # Loop through each subdirectory in the specified folder
+    for subdir in os.listdir(folder_path):
+        subdir_path = os.path.join(folder_path, subdir)
+        
+        # Check if it is a directory
+        if os.path.isdir(subdir_path):
+            # Get the list of files in the subdirectory
+            files = os.listdir(subdir_path)
+            
+            # Check if there is only one file in the subdirectory
+            if len(files) == 1:
+                # Get the file path
+                file_path = os.path.join(subdir_path, files[0])
+                
+                # Apply watermark and save the image with custom name
+                apply_watermark(file_path, custom_name)
+            else:
+                print(f"Skipping {subdir_path}: does not contain exactly one file")
+
+# Example usage
+folder_path = "data"
+custom_name = "custom"
+process_images(folder_path, custom_name)
