@@ -14,7 +14,7 @@ from torchvision.utils import save_image
 
 def split_image_crops(directory,model,kernel_size=256, device='cpu'):
     model = model.to(device)
-    
+    model.eval()
     for idx, image_file in enumerate(os.listdir(directory)):
         iamge = Image.open(os.path.join(directory,image_file)).convert('RGB')
         width, height = image.kernel_size
@@ -39,10 +39,27 @@ def split_image_crops(directory,model,kernel_size=256, device='cpu'):
         
         # Run on Patch
         
-    with torch.no_grad():
-        batch_size = 32
-        for id in tqdm(range(math.ceil(patches.shape[0]/batch_size))):
-            from_idx = id*batch_size
-            to_idx = min((id+1)*batch_size, patches.shape[0])
-            
-            curr
+        with torch.no_grad():
+            batch_size = 32
+            for id in tqdm(range(math.ceil(patches.shape[0]/batch_size))):
+                from_idx = id*batch_size
+                to_idx = min((id+1)*batch_size, patches.shape[0])
+                
+                curr_patch = patches[from_idx:to_idx].to(device)
+                patch = model(curr_patch)
+                patches[from_idx:to_idx] = (patch*0.5 + 0.5).to("cpu") # avoid OOM
+                
+        patches = patches.view(1,patches.shape[0], 3*kernel_size*kernel_size).permute(0,2,1)
+        output = F.fold(patches, output_size=(img_size,img_size),kernel_size=kernel_size, stride=dh)
+        recovery_mask = F.fold(torch.ones_like(patches),output = (img_size,img_size),
+                            kernel_size=kernel_size, stride=dh)
+        output/=recovery_mask
+        
+        augment_back = A.Compose([
+            A.CenterCrop(height=max_size-int(pad_height), width=max_size-int(pad_width)),
+            ToTensorV2,
+        ])
+        x = augment_back(image = output.squeeze(0).detach().cpu().permute(1,2,0).numpy())['image']
+        save_image(x,f"saved/test_results_{idx}.png")
+        
+    model.train()
