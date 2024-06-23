@@ -3,16 +3,28 @@ import cv2
 import numpy as np
 import math
 from PIL import Image, ImageDraw, ImageFont
+import random
+import string
 
 # Pro Tip: ~ will give shutterstock logo and ^ also give out the logo with grey background. Both at 40 degree rotation.
 
 text = "-----shutterstock-----~-------^---------"
 thickness = 0.01
-scale = 10  # Size of the one Tile
-pad = 25  # Space between two text
+scale = 18  # Size of the one Tile
+pad = 45  # Space between two text
 angle = -40  # Angle of the text.
 blend = 0.25  # Opacity of the imposed Tile
 font_path = 'shutterstock.ttf'
+
+
+def generate_random_string():
+    length = random.randint(4, 9)
+    letters = string.ascii_letters
+    return "".join(random.choice(letters) for i in range(length))
+
+random_string = generate_random_string()
+text = text + random_string
+
 
 def rotate_bound(image, angle):
     (h, w) = image.shape[:2]
@@ -132,5 +144,5 @@ def process_images(folder_path, custom_name):
 
 # Example usage
 folder_path = "data"
-custom_name = "custom"
+custom_name = "watermark"
 process_images(folder_path, custom_name)

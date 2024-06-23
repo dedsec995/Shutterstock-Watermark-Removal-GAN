@@ -4,7 +4,14 @@ from torch.utils.data import DataLoader
 from torchvision.utils import save_image
 import torchvision.transforms as transforms
 from tqdm import tqdm
+import torch.nn.functional as F
+import math
+from vgg_loss import VGGLoss
+from generator_model import Generator
+from discriminator_model import Discriminator
 
+# Assuming you have the models and loss functions already defined:
+# Generator, Discriminator, VGGLoss
 
 # Hyperparameters
 lr = 0.0002
@@ -35,11 +42,7 @@ transform = transforms.Compose(
     ]
 )
 
-dataset = WatermarkedDataset(
-    watermarked_dir="path_to_watermarked_images",
-    clean_dir="path_to_clean_images",
-    transform=transform,
-)
+dataset = WatermarkedDataset(root_dir="data", transform=transform)
 loader = DataLoader(
     dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
 )
