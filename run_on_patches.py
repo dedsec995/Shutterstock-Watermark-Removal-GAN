@@ -16,13 +16,13 @@ def split_image_crops(directory,model,kernel_size=256, device='cpu'):
     model = model.to(device)
     model.eval()
     for idx, image_file in enumerate(os.listdir(directory)):
-        iamge = Image.open(os.path.join(directory,image_file)).convert('RGB')
+        image = Image.open(os.path.join(directory,image_file)).convert('RGB')
         width, height = image.kernel_size
         max_size = math.ceil(max(width, height)/kernel_size)*kernel_size
         pad_height = max_size - height
         pad_width = max_size - width
         
-        image = np.array(iamge)
+        image = np.array(image)
         augment = A.Compose([
             A.PadIfNeeded(min_width=max_size,min_height=max_size,border_mode=cv2.BORDER_REFLECT),
             A.Normalize(mean=(0.5,0.5,0.5), std=(0.5,0.5,0.5), max_pixel_value=255.0),
@@ -30,7 +30,7 @@ def split_image_crops(directory,model,kernel_size=256, device='cpu'):
         ])
         image = augment(image=image)['image'].to(device)
         img_size = image.shape[2]
-        iamge = image.permute(1,2,0)
+        image = image.permute(1,2,0)
         kh, kw = kernel_size, kernel_size
         dh, dw = 32, 32 # stride
         

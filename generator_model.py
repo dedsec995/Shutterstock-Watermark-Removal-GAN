@@ -5,7 +5,7 @@ import torch.nn as nn
 class ConvBlock(nn.Module):
     def __init__(self,in_channels,out_channels,use_act=True, **kwargs):
         super().__init__()
-        self.cnn = nn.Conv2d(in_channels,outchannels,**kwargs,bias=False,padding='reflect')
+        self.cnn = nn.Conv2d(in_channels,out_channels,**kwargs,bias=False,padding_mode="reflect")
         self.bn = nn.BatchNorm2d(out_channels)
         self.act = nn.ReLU(inplace=True) if use_act else nn.Identity()
         
@@ -63,13 +63,13 @@ class Generator(nn.Module):
         self.initial_down = nn.Sequential(
             nn.Conv2d(
                 in_channels, features, 7,1,3,bias=True, padding_mode="reflect"),
-            nn.ReLu(inplace=True),
+            nn.ReLU(inplace=True),
         )
         self.down1 = Block(features, features*2, act="relu")
         self.down2 = Block(features*2, features*4, act="relu")
         self.down3 = Block(features*4, features*8, act="relu")
         self.down4 = Block(features*8, features*16, act="relu")
-        self.residuals = nn.Sequential(*[ResidualBlock(features*16) for _ in range(num)])
+        self.residuals = nn.Sequential(*[ResidualBlock(features*16) for _ in range(num_residuals)])
         self.up1 = Block(features*16, features*8, stride=1, act="relu")
         self.up2 = Block(features*8*2, features*4, stride=1, act="relu")
         self.up3 = Block(features*4*2, features*2, stride=1, act="relu")

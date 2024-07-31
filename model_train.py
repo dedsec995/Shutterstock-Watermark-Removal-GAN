@@ -1,136 +1,104 @@
 import torch
-import torch.optim as optim
-from torch.utils.data import DataLoader
-from torchvision.utils import save_image
-import torchvision.transforms as transforms
-from tqdm import tqdm
 import torch.nn.functional as F
-import math
-from vgg_loss import VGGLoss
+import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader
+import numpy as np
+from tqdm import tqdm
+from dataset import WaterDataset
 from generator_model import Generator
 from discriminator_model import Discriminator
-
-# Assuming you have the models and loss functions already defined:
-# Generator, Discriminator, VGGLoss
-
-# Hyperparameters
-lr = 0.0002
-batch_size = 16
-num_epochs = 100
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-patch_size = 256
-stride = 32
+from vgg_loss import VGGLoss
 
 # Initialize models
-generator = Generator(in_channels=3, out_channels=3).to(device)
-discriminator = Discriminator().to(device)
+device = "cuda" if torch.cuda.is_available() else "cpu"
+gen = Generator(in_channels=3, out_channels=3).to(device)
+disc = Discriminator(in_channels=3).to(device)
 vgg_loss = VGGLoss().to(device)
 
 # Optimizers
-opt_gen = optim.Adam(generator.parameters(), lr=lr, betas=(0.5, 0.999))
-opt_disc = optim.Adam(discriminator.parameters(), lr=lr, betas=(0.5, 0.999))
+opt_gen = optim.Adam(gen.parameters(), lr=2e-4, betas=(0.5, 0.999))
+opt_disc = optim.Adam(disc.parameters(), lr=2e-4, betas=(0.5, 0.999))
 
-# Loss functions
-bce_loss = nn.BCEWithLogitsLoss()
-l1_loss = nn.L1Loss()
+# DataLoader
+dataset = WaterDataset(root_dir="data")
+loader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=2)
 
-# Dataset and DataLoader
-transform = transforms.Compose(
-    [
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
-    ]
-)
-
-dataset = WatermarkedDataset(root_dir="data", transform=transform)
-loader = DataLoader(
-    dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True
-)
-
-
-# Helper function to split image into patches
-def extract_patches(image, patch_size, stride):
-    b, c, h, w = image.size()
-    patches = image.unfold(2, patch_size, stride).unfold(3, patch_size, stride)
-    patches = patches.contiguous().view(b, c, -1, patch_size, patch_size)
-    patches = (
-        patches.permute(0, 2, 1, 3, 4).contiguous().view(-1, c, patch_size, patch_size)
-    )
-    return patches
-
-
-# Helper function to reassemble patches into an image
-def reassemble_patches(patches, image_size, patch_size, stride):
-    b, c, h, w = image_size
-    patches = patches.view(b, -1, c, patch_size, patch_size).permute(0, 2, 1, 3, 4)
-    output = F.fold(
-        patches.view(b * c, -1, patch_size * patch_size),
-        output_size=(h, w),
-        kernel_size=patch_size,
-        stride=stride,
-    )
-    recovery_mask = F.fold(
-        torch.ones_like(patches).view(b * c, -1, patch_size * patch_size),
-        output_size=(h, w),
-        kernel_size=patch_size,
-        stride=stride,
-    )
-    output = output / recovery_mask
-    output = output.view(b, c, h, w)
-    return output
-
+# TensorBoard
+writer = SummaryWriter("runs/watermark_removal")
 
 # Training loop
+num_epochs = 100
+kernel_size = 256
+stride = 32
+batch_size = 8
+
 for epoch in range(num_epochs):
-    for idx, (watermarked_imgs, clean_imgs) in enumerate(
-        tqdm(loader, desc=f"Epoch {epoch}/{num_epochs}")
-    ):
-        watermarked_imgs = watermarked_imgs.to(device)
-        clean_imgs = clean_imgs.to(device)
+    loop = tqdm(loader, leave=True)
+    for idx, (input_image, target_image) in enumerate(loop):
+        input_image = input_image.to(device)
+        target_image = target_image.to(device)
 
-        # Extract patches
-        watermarked_patches = extract_patches(watermarked_imgs, patch_size, stride)
-        clean_patches = extract_patches(clean_imgs, patch_size, stride)
+        # Patch processing
+        patches_input = input_image.unfold(2, kernel_size, stride).unfold(
+            3, kernel_size, stride
+        )
+        patches_input = patches_input.contiguous().view(-1, 3, kernel_size, kernel_size)
 
-        # Train Discriminator
-        fake_patches = generator(watermarked_patches)
-        disc_real = discriminator(clean_patches, watermarked_patches)
-        disc_fake = discriminator(fake_patches.detach(), watermarked_patches)
+        patches_target = target_image.unfold(2, kernel_size, stride).unfold(
+            3, kernel_size, stride
+        )
+        patches_target = patches_target.contiguous().view(
+            -1, 3, kernel_size, kernel_size
+        )
 
-        loss_disc_real = bce_loss(disc_real, torch.ones_like(disc_real))
-        loss_disc_fake = bce_loss(disc_fake, torch.zeros_like(disc_fake))
+        # Discriminator training
+        disc_real = disc(patches_target, patches_input)
+        disc_fake = disc(gen(patches_input), patches_input.detach())
+        loss_disc_real = F.binary_cross_entropy_with_logits(
+            disc_real, torch.ones_like(disc_real)
+        )
+        loss_disc_fake = F.binary_cross_entropy_with_logits(
+            disc_fake, torch.zeros_like(disc_fake)
+        )
         loss_disc = (loss_disc_real + loss_disc_fake) / 2
 
         opt_disc.zero_grad()
         loss_disc.backward()
         opt_disc.step()
 
-        # Train Generator
-        disc_fake = discriminator(fake_patches, watermarked_patches)
-        loss_gen_gan = bce_loss(disc_fake, torch.ones_like(disc_fake))
-        loss_gen_l1 = l1_loss(fake_patches, clean_patches) * 100
-        loss_gen_vgg = vgg_loss(fake_patches, clean_patches) * 10
-        loss_gen = loss_gen_gan + loss_gen_l1 + loss_gen_vgg
+        # Generator training
+        disc_fake = disc(gen(patches_input), patches_input)
+        loss_gen_adv = F.binary_cross_entropy_with_logits(
+            disc_fake, torch.ones_like(disc_fake)
+        )
+        loss_gen_vgg = vgg_loss(gen(patches_input), patches_target)
+        loss_gen = loss_gen_adv + 0.1 * loss_gen_vgg
 
         opt_gen.zero_grad()
         loss_gen.backward()
         opt_gen.step()
 
-        if idx % 100 == 0:
-            print(
-                f"Epoch [{epoch}/{num_epochs}] Batch [{idx}/{len(loader)}] \
-                  Loss D: {loss_disc.item():.4f}, loss G: {loss_gen.item():.4f}"
-            )
+        # TensorBoard logging
+        writer.add_scalar(
+            "Loss/Discriminator", loss_disc.item(), epoch * len(loader) + idx
+        )
+        writer.add_scalar("Loss/Generator", loss_gen.item(), epoch * len(loader) + idx)
 
-    # Save some example images
-    if epoch % 10 == 0:
-        # Reassemble patches into images for visualization
-        fake_imgs = reassemble_patches(
-            fake_patches, watermarked_imgs.size(), patch_size, stride
-        )
-        save_image(
-            fake_imgs[:25], f"saved_images/fake_{epoch}.png", nrow=5, normalize=True
-        )
-        save_image(
-            clean_imgs[:25], f"saved_images/real_{epoch}.png", nrow=5, normalize=True
-        )
+        if idx % 100 == 0:
+            with torch.no_grad():
+                fake_images = gen(input_image)
+                writer.add_images(
+                    "Images/Input", input_image, epoch * len(loader) + idx
+                )
+                writer.add_images(
+                    "Images/Target", target_image, epoch * len(loader) + idx
+                )
+                writer.add_images("Images/Fake", fake_images, epoch * len(loader) + idx)
+
+        loop.set_description(f"Epoch [{epoch}/{num_epochs}]")
+        loop.set_postfix(loss_disc=loss_disc.item(), loss_gen=loss_gen.item())
+
+# Save models
+torch.save(gen.state_dict(), "generator.pth")
+torch.save(disc.state_dict(), "discriminator.pth")

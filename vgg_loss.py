@@ -1,12 +1,12 @@
 import torch.nn as nn
 import torch
 import torchvision
-import config
+# import config
 
 class VGG19(nn.Module):
     def __init__(self, required_grad=False):
         super(VGG19, self).__init__()
-        vgg_pretrained_features = torchvision.models.vgg19(pretrained=True).features
+        vgg_pretrained_features = torchvision.models.vgg19(weights=torchvision.models.VGG19_Weights.DEFAULT).features
         self.slice1 = torch.nn.Sequential()
         self.slice2 = torch.nn.Sequential()
         self.slice3 = torch.nn.Sequential()

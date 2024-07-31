@@ -9,7 +9,8 @@ __pycache__/
 *.png
 
 dataset/data
-
+logs/
+runs/
 
 # C extensions
 *.so
