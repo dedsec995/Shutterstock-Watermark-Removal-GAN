@@ -2,43 +2,37 @@ import numpy as np
 import os
 from PIL import Image
 from torch.utils.data import Dataset
-from torchvision import transforms
-from PIL import ImageFile
-
-ImageFile.LOAD_TRUNCATED_IMAGES = True
-
+import torchvision.transforms as transforms
+from torchvision.transforms.functional import crop
 
 class WaterDataset(Dataset):
-    def __init__(self, root_dir, image_size=(256, 256)):
+    def __init__(self, root_dir, transform=None, patch_size=256):
         self.root_dir = root_dir
-        self.image_size = image_size
-        self.list_files = [
-            f
-            for f in os.listdir(self.root_dir)
-            if os.path.isdir(os.path.join(self.root_dir, f))
-        ]
-        self.transform = transforms.Compose(
-            [
-                transforms.Resize(self.image_size),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)),
-            ]
-        )
+        self.subdirs = [d for d in os.listdir(self.root_dir) if os.path.isdir(os.path.join(self.root_dir, d))]
+        self.transform = transform
+        self.patch_size = patch_size
 
     def __len__(self):
-        return len(self.list_files)
+        return len(self.subdirs)
 
     def __getitem__(self, index):
-        folder_name = self.list_files[index]
-        folder_path = os.path.join(self.root_dir, folder_name)
+        subdir = self.subdirs[index]
+        input_img_path = os.path.join(self.root_dir, subdir, f"{subdir}_watermark.jpg")
+        target_img_path = os.path.join(self.root_dir, subdir, f"{subdir}.jpg")
 
-        input_image_path = os.path.join(folder_path, f"{folder_name}_watermark.jpg")
-        target_image_path = os.path.join(folder_path, f"{folder_name}.jpg")
+        input_image = Image.open(input_img_path).convert("RGB")
+        target_image = Image.open(target_img_path).convert("RGB")
 
-        input_image = Image.open(input_image_path).convert("RGB")
-        target_image = Image.open(target_image_path).convert("RGB")
+        # Ensure both images have the same dimensions
+        assert input_image.size == target_image.size, "Input and target images must have the same dimensions."
 
-        input_image = self.transform(input_image)
-        target_image = self.transform(target_image)
+        # Apply random crop to both images
+        i, j, h, w = transforms.RandomCrop.get_params(input_image, output_size=(self.patch_size, self.patch_size))
+        input_image = crop(input_image, i, j, h, w)
+        target_image = crop(target_image, i, j, h, w)
+
+        if self.transform:
+            input_image = self.transform(input_image)
+            target_image = self.transform(target_image)
 
         return input_image, target_image

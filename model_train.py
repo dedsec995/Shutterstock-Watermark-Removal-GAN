@@ -1,104 +1,117 @@
 import torch
-import torch.nn.functional as F
+import torch.nn as nn
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
-import numpy as np
-from tqdm import tqdm
+from torchvision.utils import make_grid
+from torch.utils.tensorboard import SummaryWriter
+import torchvision.transforms as transforms
 from dataset import WaterDataset
 from generator_model import Generator
 from discriminator_model import Discriminator
 from vgg_loss import VGGLoss
 
+# Define hyperparameters
+num_epochs = 100
+batch_size = 8
+lr = 0.0002
+patch_size = 256
+
+# Transform for dataset
+transform = transforms.Compose([
+    transforms.ToTensor(),
+])
+
+# Initialize dataset and dataloader
+dataset = WaterDataset(root_dir="data", transform=transform, patch_size=patch_size)
+dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
 # Initialize models
-device = "cuda" if torch.cuda.is_available() else "cpu"
-gen = Generator(in_channels=3, out_channels=3).to(device)
-disc = Discriminator(in_channels=3).to(device)
-vgg_loss = VGGLoss().to(device)
+generator = Generator(in_channels=3, out_channels=3).cuda()
+discriminator = Discriminator(in_channels=3).cuda()
+
+# Losses
+criterion_GAN = nn.MSELoss().cuda()
+criterion_pixelwise = nn.L1Loss().cuda()
+vgg_loss = VGGLoss().cuda()
 
 # Optimizers
-opt_gen = optim.Adam(gen.parameters(), lr=2e-4, betas=(0.5, 0.999))
-opt_disc = optim.Adam(disc.parameters(), lr=2e-4, betas=(0.5, 0.999))
-
-# DataLoader
-dataset = WaterDataset(root_dir="data")
-loader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=2)
+optimizer_G = optim.Adam(generator.parameters(), lr=lr, betas=(0.5, 0.999))
+optimizer_D = optim.Adam(discriminator.parameters(), lr=lr, betas=(0.5, 0.999))
 
 # TensorBoard
-writer = SummaryWriter("runs/watermark_removal")
+writer = SummaryWriter()
 
 # Training loop
-num_epochs = 100
-kernel_size = 256
-stride = 32
-batch_size = 8
-
 for epoch in range(num_epochs):
-    loop = tqdm(loader, leave=True)
-    for idx, (input_image, target_image) in enumerate(loop):
-        input_image = input_image.to(device)
-        target_image = target_image.to(device)
+    for i, (input_image, target_image) in enumerate(dataloader):
+        input_image = input_image.cuda()
+        target_image = target_image.cuda()
 
-        # Patch processing
-        patches_input = input_image.unfold(2, kernel_size, stride).unfold(
-            3, kernel_size, stride
-        )
-        patches_input = patches_input.contiguous().view(-1, 3, kernel_size, kernel_size)
+        # Generate fake image
+        fake_image = generator(input_image)
 
-        patches_target = target_image.unfold(2, kernel_size, stride).unfold(
-            3, kernel_size, stride
-        )
-        patches_target = patches_target.contiguous().view(
-            -1, 3, kernel_size, kernel_size
-        )
+        # Adversarial ground truths
+        pred_real = discriminator(input_image, target_image)
+        pred_fake = discriminator(input_image, fake_image.detach())
 
-        # Discriminator training
-        disc_real = disc(patches_target, patches_input)
-        disc_fake = disc(gen(patches_input), patches_input.detach())
-        loss_disc_real = F.binary_cross_entropy_with_logits(
-            disc_real, torch.ones_like(disc_real)
-        )
-        loss_disc_fake = F.binary_cross_entropy_with_logits(
-            disc_fake, torch.zeros_like(disc_fake)
-        )
-        loss_disc = (loss_disc_real + loss_disc_fake) / 2
+        valid = torch.ones_like(pred_real, requires_grad=False).cuda()
+        fake = torch.zeros_like(pred_fake, requires_grad=False).cuda()
 
-        opt_disc.zero_grad()
-        loss_disc.backward()
-        opt_disc.step()
+        # ---------------------
+        #  Train Discriminator
+        # ---------------------
 
-        # Generator training
-        disc_fake = disc(gen(patches_input), patches_input)
-        loss_gen_adv = F.binary_cross_entropy_with_logits(
-            disc_fake, torch.ones_like(disc_fake)
-        )
-        loss_gen_vgg = vgg_loss(gen(patches_input), patches_target)
-        loss_gen = loss_gen_adv + 0.1 * loss_gen_vgg
+        optimizer_D.zero_grad()
 
-        opt_gen.zero_grad()
-        loss_gen.backward()
-        opt_gen.step()
+        # Real loss
+        loss_real = criterion_GAN(pred_real, valid)
 
-        # TensorBoard logging
-        writer.add_scalar(
-            "Loss/Discriminator", loss_disc.item(), epoch * len(loader) + idx
-        )
-        writer.add_scalar("Loss/Generator", loss_gen.item(), epoch * len(loader) + idx)
+        # Fake loss
+        loss_fake = criterion_GAN(pred_fake, fake)
 
-        if idx % 100 == 0:
-            with torch.no_grad():
-                fake_images = gen(input_image)
-                writer.add_images(
-                    "Images/Input", input_image, epoch * len(loader) + idx
-                )
-                writer.add_images(
-                    "Images/Target", target_image, epoch * len(loader) + idx
-                )
-                writer.add_images("Images/Fake", fake_images, epoch * len(loader) + idx)
+        # Total loss
+        loss_D = (loss_real + loss_fake) / 2
 
-        loop.set_description(f"Epoch [{epoch}/{num_epochs}]")
-        loop.set_postfix(loss_disc=loss_disc.item(), loss_gen=loss_gen.item())
+        loss_D.backward()
+        optimizer_D.step()
 
-# Save models
-torch.save(gen.state_dict(), "generator.pth")
-torch.save(disc.state_dict(), "discriminator.pth")
+        # -----------------
+        #  Train Generator
+        # -----------------
+
+        optimizer_G.zero_grad()
+
+        # GAN loss
+        pred_fake = discriminator(input_image, fake_image)
+        loss_GAN = criterion_GAN(pred_fake, valid)
+
+        # Pixel-wise loss
+        loss_pixel = criterion_pixelwise(fake_image, target_image)
+
+        # VGG loss
+        loss_vgg = vgg_loss(fake_image, target_image)
+
+        # Total loss
+        loss_G = loss_GAN + 100 * loss_pixel + 10 * loss_vgg
+
+        loss_G.backward()
+        optimizer_G.step()
+
+        # Print log
+        if i % 10 == 0:
+            print(f"[Epoch {epoch}/{num_epochs}] [Batch {i}/{len(dataloader)}] [D loss: {loss_D.item()}] [G loss: {loss_G.item()}]")
+
+        # TensorBoard log
+        writer.add_scalar("Loss/Discriminator", loss_D.item(), epoch * len(dataloader) + i)
+        writer.add_scalar("Loss/Generator", loss_G.item(), epoch * len(dataloader) + i)
+
+        # Log images to TensorBoard every 100 batches
+        if i % 100 == 0:
+            img_grid_input = make_grid(input_image[:4], normalize=True)
+            img_grid_target = make_grid(target_image[:4], normalize=True)
+            img_grid_fake = make_grid(fake_image[:4], normalize=True)
+            writer.add_image("Input Images", img_grid_input, global_step=epoch * len(dataloader) + i)
+            writer.add_image("Target Images", img_grid_target, global_step=epoch * len(dataloader) + i)
+            writer.add_image("Fake Images", img_grid_fake, global_step=epoch * len(dataloader) + i)
+
+writer.close()
