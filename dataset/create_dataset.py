@@ -11,7 +11,7 @@ import string
 text_template = "-----shutterstock-----~-------^---------"
 thickness = 0.01
 scale = 18  # Size of the one Tile
-pad = 45  # Space between two text
+pad = 30  # Space between two text
 angle = -40  # Angle of the text.
 blend = 0.40  # Opacity of the imposed Tile
 font_path = "shutterstock.ttf"
